@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 Additional documentation and release notes are available at [Multiplayer Documentation](https://docs-multiplayer.unity3d.com).
 
-## [Unreleased]
+## [1.1.0] - 2022-10-19
 
 ### Added
 
@@ -23,9 +23,13 @@ Additional documentation and release notes are available at [Multiplayer Documen
 - The send queues of `UnityTransport` are now dynamically-sized. This means that there shouldn't be any need anymore to tweak the 'Max Send Queue Size' value. In fact, this field is now removed from the inspector and will not be serialized anymore. It is still possible to set it manually using the `MaxSendQueueSize` property, but it is not recommended to do so aside from some specific needs (e.g. limiting the amount of memory used by the send queues in very constrained environments). (#2212)
 - As a consequence of the above change, the `UnityTransport.InitialMaxSendQueueSize` field is now deprecated. There is no default value anymore since send queues are dynamically-sized. (#2212)
 - The debug simulator in `UnityTransport` is now non-deterministic. Its random number generator used to be seeded with a constant value, leading to the same pattern of packet drops, delays, and jitter in every run. (#2196)
+- `NetworkVariable<>` now supports managed `INetworkSerializable` types, as well as other managed types with serialization/deserialization delegates registered to `UserNetworkVariableSerialization<T>.WriteValue` and `UserNetworkVariableSerialization<T>.ReadValue` (#2219)
+- `NetworkVariable<>` and `BufferSerializer<BufferSerializerReader>` now deserialize `INetworkSerializable` types in-place, rather than constructing new ones. (#2219)
 
 ### Fixed
 
+- Fixed issue caused when changing ownership of objects hidden to some clients (#2242)
+- Fixed issue where an in-scene placed NetworkObject would not invoke NetworkBehaviour.OnNetworkSpawn if the GameObject was disabled when it was despawned. (#2239)
 - Fixed issue where clients were not rebuilding the `NetworkConfig` hash value for each unique connection request. (#2226)
 - Fixed the issue where player objects were not taking the `DontDestroyWithOwner` property into consideration when a client disconnected. (#2225)
 - Fixed issue where `SceneEventProgress` would not complete if a client late joins while it is still in progress. (#2222)
