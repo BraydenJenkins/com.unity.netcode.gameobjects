@@ -870,6 +870,8 @@ namespace Unity.Netcode
 
         private void Initialize(bool server)
         {
+            Debug.Log("Network Manager init - Brayden");
+
             // Don't allow the user to start a network session if the NetworkManager is
             // still parented under another GameObject
             if (NetworkManagerCheckForParent(true))
