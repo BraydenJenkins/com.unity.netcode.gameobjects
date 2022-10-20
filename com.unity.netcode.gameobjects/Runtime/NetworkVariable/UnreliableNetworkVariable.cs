@@ -8,7 +8,7 @@ namespace Unity.Netcode
     /// </summary>
     /// <typeparam name="T">the unmanaged type for <see cref="UnreliableNetworkVariable{T}"/> </typeparam>
     [Serializable]
-    public class UnreliableNetworkVariable<T> : NetworkVariableBase
+    public class UnreliableNetworkVariable<T> : UnreliableNetworkVariableBase
     {
         /// <summary>
         /// Delegate type for value changed event
