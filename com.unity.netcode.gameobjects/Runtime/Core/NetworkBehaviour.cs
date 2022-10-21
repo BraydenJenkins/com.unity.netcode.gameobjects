@@ -552,6 +552,10 @@ namespace Unity.Netcode
         private readonly List<NetworkDelivery> m_DeliveryTypesForNetworkVariableGroups = new List<NetworkDelivery>();
         internal readonly List<NetworkVariableBase> NetworkVariableFields = new List<NetworkVariableBase>();
 
+        private readonly List<HashSet<int>> m_DeliveryMappedUnreliableNetworkVariableIndices = new List<HashSet<int>>();
+        private readonly List<NetworkDelivery> m_DeliveryTypesForUnreliableNetworkVariableGroups = new List<NetworkDelivery>();
+        internal readonly List<UnreliableNetworkVariableBase> UnreliableNetworkVariableFields = new List<UnreliableNetworkVariableBase>();
+
         private static Dictionary<Type, FieldInfo[]> s_FieldTypes = new Dictionary<Type, FieldInfo[]>();
 
         private static FieldInfo[] GetFieldInfoForType(Type type)
@@ -614,6 +618,24 @@ namespace Unity.Netcode
 
                     NetworkVariableFields.Add(instance);
                 }
+
+                if (fieldType.IsSubclassOf(typeof(UnreliableNetworkVariableBase)))
+                {
+                    var instance = (UnreliableNetworkVariableBase)sortedFields[i].GetValue(this);
+
+                    if (instance == null)
+                    {
+                        throw new Exception($"{GetType().FullName}.{sortedFields[i].Name} cannot be null. All {nameof(UnreliableNetworkVariableBase)} instances must be initialized.");
+                    }
+
+                    instance.Initialize(this);
+
+                    var instanceNameProperty = fieldType.GetProperty(nameof(UnreliableNetworkVariableBase.Name));
+                    var sanitizedVariableName = sortedFields[i].Name.Replace("<", string.Empty).Replace(">k__BackingField", string.Empty);
+                    instanceNameProperty?.SetValue(instance, sanitizedVariableName);
+
+                    UnreliableNetworkVariableFields.Add(instance);
+                }
             }
 
             {
@@ -638,6 +660,27 @@ namespace Unity.Netcode
 
                     m_DeliveryMappedNetworkVariableIndices[firstLevelIndex[networkDelivery]].Add(i);
                 }
+
+                var firstLevelIndexUnreliable = new Dictionary<NetworkDelivery, int>();
+                int secondLevelCounterUnreliable = 0;
+
+                for (int i = 0; i < UnreliableNetworkVariableFields.Count; i++)
+                {
+                    var networkDelivery = UnreliableNetworkVariableBase.Delivery;
+                    if (!firstLevelIndexUnreliable.ContainsKey(networkDelivery))
+                    {
+                        firstLevelIndexUnreliable.Add(networkDelivery, secondLevelCounterUnreliable);
+                        m_DeliveryTypesForUnreliableNetworkVariableGroups.Add(networkDelivery);
+                        secondLevelCounterUnreliable++;
+                    }
+
+                    if (firstLevelIndexUnreliable[networkDelivery] >= m_DeliveryMappedUnreliableNetworkVariableIndices.Count)
+                    {
+                        m_DeliveryMappedUnreliableNetworkVariableIndices.Add(new HashSet<int>());
+                    }
+
+                    m_DeliveryMappedUnreliableNetworkVariableIndices[firstLevelIndexUnreliable[networkDelivery]].Add(i);
+                }
             }
         }
 
@@ -658,6 +701,10 @@ namespace Unity.Netcode
                 {
                     NetworkVariableFields[i].ResetDirty();
                 }
+                for (int i = 0; i < UnreliableNetworkVariableFields.Count; i++)
+                {
+                    UnreliableNetworkVariableFields[i].ResetDirty();
+                }
             }
             else
             {
@@ -665,6 +712,10 @@ namespace Unity.Netcode
                 for (int i = 0; i < NetworkVariableIndexesToReset.Count; i++)
                 {
                     NetworkVariableFields[NetworkVariableIndexesToReset[i]].ResetDirty();
+                }
+                for (int i = 0; i < UnreliableNetworkVariableIndexesToReset.Count; i++)
+                {
+                    UnreliableNetworkVariableFields[NetworkVariableIndexesToReset[i]].ResetDirty();
                 }
             }
 
@@ -688,6 +739,9 @@ namespace Unity.Netcode
 
         internal readonly List<int> NetworkVariableIndexesToReset = new List<int>();
         internal readonly HashSet<int> NetworkVariableIndexesToResetSet = new HashSet<int>();
+
+        internal readonly List<int> UnreliableNetworkVariableIndexesToReset = new List<int>();
+        internal readonly HashSet<int> UnreliableNetworkVariableIndexesToResetSet = new HashSet<int>();
 
         private void NetworkVariableUpdate(ulong targetClientId, int behaviourIndex)
         {
@@ -738,6 +792,49 @@ namespace Unity.Netcode
                     }
                 }
             }
+
+            for (int j = 0; j < m_DeliveryMappedUnreliableNetworkVariableIndices.Count; j++)
+            {
+                var shouldSend = false;
+                for (int k = 0; k < UnreliableNetworkVariableFields.Count; k++)
+                {
+                    var networkVariable = UnreliableNetworkVariableFields[k];
+                    if (networkVariable.IsDirty() && networkVariable.CanClientRead(targetClientId))
+                    {
+                        shouldSend = true;
+                        break;
+                    }
+                }
+
+                if (shouldSend)
+                {
+                    var message = new NetworkVariableDeltaMessage
+                    {
+                        NetworkObjectId = NetworkObjectId,
+                        NetworkBehaviourIndex = NetworkObject.GetNetworkBehaviourOrderIndex(this),
+                        NetworkBehaviour = this,
+                        TargetClientId = targetClientId,
+                        DeliveryMappedUnreliableNetworkVariableIndex = m_DeliveryMappedUnreliableNetworkVariableIndices[j]
+                    };
+                    // TODO: Serialization is where the IsDirty flag gets changed.
+                    // Messages don't get sent from the server to itself, so if we're host and sending to ourselves,
+                    // we still have to actually serialize the message even though we're not sending it, otherwise
+                    // the dirty flag doesn't change properly. These two pieces should be decoupled at some point
+                    // so we don't have to do this serialization work if we're not going to use the result.
+                    if (IsServer && targetClientId == NetworkManager.ServerClientId)
+                    {
+                        var tmpWriter = new FastBufferWriter(MessagingSystem.NON_FRAGMENTED_MESSAGE_MAX_SIZE, Allocator.Temp, MessagingSystem.FRAGMENTED_MESSAGE_MAX_SIZE);
+                        using (tmpWriter)
+                        {
+                            message.Serialize(tmpWriter);
+                        }
+                    }
+                    else
+                    {
+                        NetworkManager.SendMessage(ref message, m_DeliveryTypesForNetworkVariableGroups[j], targetClientId);
+                    }
+                }
+            }
         }
 
         private bool CouldHaveDirtyNetworkVariables()
@@ -746,6 +843,14 @@ namespace Unity.Netcode
             for (int i = 0; i < NetworkVariableFields.Count; i++)
             {
                 if (NetworkVariableFields[i].IsDirty())
+                {
+                    return true;
+                }
+            }
+
+            for (int i = 0; i < UnreliableNetworkVariableFields.Count; i++)
+            {
+                if (UnreliableNetworkVariableFields[i].IsDirty())
                 {
                     return true;
                 }
@@ -760,11 +865,15 @@ namespace Unity.Netcode
             {
                 NetworkVariableFields[j].SetDirty(dirty);
             }
+            for (int j = 0; j < UnreliableNetworkVariableFields.Count; j++)
+            {
+                UnreliableNetworkVariableFields[j].SetDirty(dirty);
+            }
         }
 
         internal void WriteNetworkVariableData(FastBufferWriter writer, ulong targetClientId)
         {
-            if (NetworkVariableFields.Count == 0)
+            if (NetworkVariableFields.Count == 0 && UnreliableNetworkVariableFields.Count == 0)
             {
                 return;
             }
@@ -789,11 +898,31 @@ namespace Unity.Netcode
                     writer.WriteValueSafe((ushort)0);
                 }
             }
+            for (int j = 0; j < UnreliableNetworkVariableFields.Count; j++)
+            {
+                bool canClientRead = UnreliableNetworkVariableFields[j].CanClientRead(targetClientId);
+
+                if (canClientRead)
+                {
+                    var writePos = writer.Position;
+                    writer.WriteValueSafe((ushort)0);
+                    var startPos = writer.Position;
+                    UnreliableNetworkVariableFields[j].WriteField(writer);
+                    var size = writer.Position - startPos;
+                    writer.Seek(writePos);
+                    writer.WriteValueSafe((ushort)size);
+                    writer.Seek(startPos + size);
+                }
+                else
+                {
+                    writer.WriteValueSafe((ushort)0);
+                }
+            }
         }
 
         internal void SetNetworkVariableData(FastBufferReader reader)
         {
-            if (NetworkVariableFields.Count == 0)
+            if (NetworkVariableFields.Count == 0 && UnreliableNetworkVariableFields.Count == 0)
             {
                 return;
             }
@@ -808,6 +937,39 @@ namespace Unity.Netcode
 
                 var readStartPos = reader.Position;
                 NetworkVariableFields[j].ReadField(reader);
+
+                if (NetworkManager.NetworkConfig.EnsureNetworkVariableLengthSafety)
+                {
+                    if (reader.Position > (readStartPos + varSize))
+                    {
+                        if (NetworkLog.CurrentLogLevel <= LogLevel.Normal)
+                        {
+                            NetworkLog.LogWarning($"Var data read too far. {reader.Position - (readStartPos + varSize)} bytes.");
+                        }
+
+                        reader.Seek(readStartPos + varSize);
+                    }
+                    else if (reader.Position < (readStartPos + varSize))
+                    {
+                        if (NetworkLog.CurrentLogLevel <= LogLevel.Normal)
+                        {
+                            NetworkLog.LogWarning($"Var data read too little. {(readStartPos + varSize) - reader.Position} bytes.");
+                        }
+
+                        reader.Seek(readStartPos + varSize);
+                    }
+                }
+            }
+            for (int j = 0; j < UnreliableNetworkVariableFields.Count; j++)
+            {
+                reader.ReadValueSafe(out ushort varSize);
+                if (varSize == 0)
+                {
+                    continue;
+                }
+
+                var readStartPos = reader.Position;
+                UnreliableNetworkVariableFields[j].ReadField(reader);
 
                 if (NetworkManager.NetworkConfig.EnsureNetworkVariableLengthSafety)
                 {
