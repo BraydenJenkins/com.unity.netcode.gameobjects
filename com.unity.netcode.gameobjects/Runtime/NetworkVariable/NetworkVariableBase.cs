@@ -11,7 +11,7 @@ namespace Unity.Netcode
         /// <summary>
         /// The delivery type (QoS) to send data with
         /// </summary>
-        internal const NetworkDelivery Delivery = NetworkDelivery.UnreliableSequenced;
+        internal const NetworkDelivery Delivery = NetworkDelivery.Unreliable;
 
         /// <summary>
         /// Maintains a link to the associated NetworkBehaviour
