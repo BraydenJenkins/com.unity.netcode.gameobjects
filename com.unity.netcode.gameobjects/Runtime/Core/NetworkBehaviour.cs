@@ -808,7 +808,7 @@ namespace Unity.Netcode
 
                 if (shouldSend)
                 {
-                    var message = new NetworkVariableDeltaMessage
+                    var message = new UnreliableNetworkVariableDeltaMessage
                     {
                         NetworkObjectId = NetworkObjectId,
                         NetworkBehaviourIndex = NetworkObject.GetNetworkBehaviourOrderIndex(this),
