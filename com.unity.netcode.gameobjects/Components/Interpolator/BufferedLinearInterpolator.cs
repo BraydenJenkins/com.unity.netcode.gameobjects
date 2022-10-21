@@ -181,7 +181,8 @@ namespace Unity.Netcode
 
             if (InvalidState)
             {
-                throw new InvalidOperationException("trying to update interpolator when no data has been added to it yet");
+                //throw new InvalidOperationException("trying to update interpolator when no data has been added to it yet");
+                return;
             }
 
             // Interpolation example to understand the math below
